@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.20.2)
+
+project(Tephigram)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+set(CMAKE_BINARY_DIR ${CMAKE_SOURCE_DIR}/build)
+
+#------------------------------------------------------------------------------
+#Mesum User configuration
+#------------------------------------------------------------------------------
+#Build as dynamic
+set(BM_CUSTOM_BUILD "TRUE")
+#Build as dynamic
+set(BM_DYNAMIC_LINK "FALSE")
+#Are all the renderer available to the applications
+set(BM_ALL_RENDERER "TRUE")
+#Defines the default renderer (BM_DX12/BM_VULKAN) (mendatory)
+set(BM_DEFAULT_RENDERER "BM_VULKAN")
+
+include (Mesum/CMakeSetup.cmake)
+setup_config()
+
+add_subdirectory(Mesum)
+
+add_subdirectory(App)

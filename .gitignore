@@ -1,32 +1,18 @@
-# Prerequisites
-*.d
+build/
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# VS
+.vscode/
+.vs/
+CMakeSettings.json
 
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
+# Build files
+*.pdb
 *.exe
-*.out
-*.app
+*.ilk
+
+# Mesum
+*CONERR$
+
+# Clion
+.idea/
+cmake-build-debug/
