@@ -12,6 +12,8 @@
 #include <random>
 #include <algorithm>
 
+#include <MesumGraphics/DearImgui/imgui_internal.h>
+
 #ifdef min
 #undef min
 #endif
@@ -23,6 +25,16 @@
 const m::logging::mChannelID m_Tephigram_ID = mLog_getId();
 
 using namespace m;
+
+ImVec2 operator+(const ImVec2 &a_r, ImVec2 const &a_l)
+{
+    return {a_r.x + a_l.x, a_r.y + a_l.y};
+}
+
+ImVec2 operator-(const ImVec2 &a_r, ImVec2 const &a_l)
+{
+    return {a_r.x - a_l.x, a_r.y - a_l.y};
+}
 
 class TephigramApp : public m::crossPlatform::IWindowedApplication
 {
@@ -148,6 +160,95 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                             .count());
         ImGui::End();
 
+        // Tephigram-----------
+        ImGui::Begin("Tephigram Window");
+
+        ImGuiContext &G        = *GImGui;
+        ImGuiWindow  *window   = G.CurrentWindow;
+        ImDrawList   *drawList = ImGui::GetWindowDrawList();
+        ImVec2        position = window->DC.CursorPos;
+
+        const mFloat minTemp = -30;
+        const mFloat maxTemp = 30;
+
+        const mFloat minPhi = 200;
+        const mFloat maxPhi = 400;
+
+        const ImVec2 canvasSize  = {400, 300};
+        const ImVec2 sizePadding = {20, 20};
+        const ImVec2 sizeGraph   = canvasSize - sizePadding - sizePadding;
+        const ImVec2 graphOrigin =
+            position + ImVec2(sizePadding.x, sizePadding.y + sizeGraph.y);
+        const mUInt nbGraduationX = 10;
+        const mUInt nbGraduationY = 10;
+        const ImU32 colCanvas     = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
+        const ImU32 colBg         = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
+        const ImU32 colLine       = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
+        const ImU32 colPress      = ImColor(0.0f, 0.1f, 0.2f, 0.4f);
+
+        const ImGuiID ID = window->GetID("Tephigram");
+
+        ImVec2 frameSize = ImGui::CalcItemSize(canvasSize, 400, 300);
+        ImRect frameRect =
+            ImRect(window->DC.CursorPos, window->DC.CursorPos + frameSize);
+        // ImGui::ItemSize(frameRect);
+        // ImGui::ItemAdd(frameRect, ID, &frameRect);
+
+        drawList->AddRectFilled(position, position + frameSize, colCanvas);
+        drawList->AddRectFilled(position + sizePadding,
+                                position + sizePadding + sizeGraph, colBg);
+
+        mFloat yPosNutre = 0;
+        mFloat yPosAdded = 0.1 * sizePadding.y;
+        mFloat xPosNutre = 0;
+        mFloat xPosAdded = -0.5 * sizePadding.x;
+
+        ImVec2 points[nbGraduationX + 1];
+
+        for (mUInt i = 0; i < nbGraduationX; ++i)
+        {
+            mFloat xPos = sizeGraph.x * i / (nbGraduationX)-1;
+            drawList->AddLine(graphOrigin + ImVec2(xPos, yPosNutre),
+                              graphOrigin + ImVec2(xPos, yPosAdded), colLine);
+
+            drawList->AddLine(graphOrigin + ImVec2(xPos, yPosNutre),
+                              graphOrigin + ImVec2(xPos, -sizeGraph.y),
+                              colLine);
+
+            mFloat temperature = minTemp + (maxTemp - minTemp) * i / (nbGraduationX-1);
+            points[i].x        = graphOrigin.x + xPos;
+            mDouble tephi = (temperature+273.15)*std::pow((100/100), 0.286);
+            mDouble tephiRatio = (tephi - minPhi)/(maxPhi - minPhi);
+            points[i].y = graphOrigin.y - tephiRatio * sizeGraph.y;
+
+            char temp[16];
+            ImFormatString(temp, 16, "%d", mInt(temperature));
+            drawList->AddText(graphOrigin + ImVec2(xPos, 0.3 * yPosAdded),
+                              colLine, temp);
+        }
+
+        points[nbGraduationX].x        = graphOrigin.x + sizeGraph.x;
+        mDouble tephi = 273.15+maxTemp + ((maxTemp - minTemp) / (nbGraduationX-1)) *std::pow((100/100), 0.286);
+        mDouble tephiRatio = (tephi - minPhi)/(maxPhi - minPhi);
+        points[nbGraduationX].y = graphOrigin.y - tephiRatio * sizeGraph.y;
+
+        for (mUInt i = 0; i < nbGraduationY; ++i)
+        {
+            mFloat yPos = -sizeGraph.y * i / (nbGraduationY)-1;
+            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
+                              graphOrigin + ImVec2(xPosAdded, yPos), colLine);
+
+            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
+                              graphOrigin + ImVec2(sizeGraph.x, yPos), colLine);
+        }
+
+        ImGui::PushClipRect(
+            position + sizePadding, position + sizePadding + sizeGraph, true);
+        drawList->AddPolyline(points, nbGraduationX + 1, colPress, 0, 1.0f);
+
+        ImGui::End();
+
+        // Render-----------
         ImGui::Render();
 
         m_tasksetExecutor.run();
