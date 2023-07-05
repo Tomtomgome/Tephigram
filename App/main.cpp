@@ -36,6 +36,12 @@ ImVec2 operator-(const ImVec2 &a_r, ImVec2 const &a_l)
     return {a_r.x - a_l.x, a_r.y - a_l.y};
 }
 
+// temperature °C, pressure kPa
+mFloat getPhi(const mFloat a_temperature, const mFloat a_pressure)
+{
+    return (a_temperature + 273.15) * std::pow((100 / a_pressure), 0.286);
+}
+
 class TephigramApp : public m::crossPlatform::IWindowedApplication
 {
     void init(m::mCmdLine const &a_cmdLine, void *a_appData) override
@@ -163,36 +169,46 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         // Tephigram-----------
         ImGui::Begin("Tephigram Window");
 
+        static mFloat boundTemp[2] = {-30, 30};
+        static mFloat boundPhi[2]  = {200, 400};
+
+        ImGui::DragFloat2("Temperature Bounds (°C)", boundTemp, 0.5, -30, 30);
+        mFloat      minTemp = boundTemp[0];
+        mFloat      maxTemp = boundTemp[1];
+        static mInt divTemp = 5;
+        ImGui::DragInt("Temperature Subdivisions", &divTemp, 1, 0, 20);
+
+        ImGui::DragFloat2("Temperature Capacity Bounds (°K)", boundPhi, 0.5, 50,
+                          700);
+        mFloat      minPhi = boundPhi[0];
+        mFloat      maxPhi = boundPhi[1];
+        static mInt divPhi = 5;
+        ImGui::DragInt("Temperature Capacity Subdivisions", &divPhi, 1, 0, 20);
+
+        static mInt nbPressureLine = 5;
+        ImGui::DragInt("Nb Pressure Lines", &nbPressureLine, 1, 1, 10);
+        static mFloat maxPressure = 100;
+        ImGui::DragFloat("Max Pressure (kPa)", &maxPressure, 1, 10, 100);
+        static mFloat deltaPressure = 15;
+        ImGui::DragFloat("Pressure Delta", &deltaPressure, 1, 1, 30);
+
         ImGuiContext &G        = *GImGui;
         ImGuiWindow  *window   = G.CurrentWindow;
         ImDrawList   *drawList = ImGui::GetWindowDrawList();
         ImVec2        position = window->DC.CursorPos;
-
-        const mFloat minTemp = -30;
-        const mFloat maxTemp = 30;
-
-        const mFloat minPhi = 200;
-        const mFloat maxPhi = 400;
 
         const ImVec2 canvasSize  = {400, 300};
         const ImVec2 sizePadding = {20, 20};
         const ImVec2 sizeGraph   = canvasSize - sizePadding - sizePadding;
         const ImVec2 graphOrigin =
             position + ImVec2(sizePadding.x, sizePadding.y + sizeGraph.y);
-        const mUInt nbGraduationX = 10;
-        const mUInt nbGraduationY = 10;
-        const ImU32 colCanvas     = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
-        const ImU32 colBg         = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
-        const ImU32 colLine       = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
-        const ImU32 colPress      = ImColor(0.0f, 0.1f, 0.2f, 0.4f);
+        const ImU32 colCanvas = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
+        const ImU32 colBg     = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
+        const ImU32 colLine   = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
+        const ImU32 colPress  = ImColor(0.0f, 0.1f, 0.2f, 0.4f);
 
-        const ImGuiID ID = window->GetID("Tephigram");
 
         ImVec2 frameSize = ImGui::CalcItemSize(canvasSize, 400, 300);
-        ImRect frameRect =
-            ImRect(window->DC.CursorPos, window->DC.CursorPos + frameSize);
-        // ImGui::ItemSize(frameRect);
-        // ImGui::ItemAdd(frameRect, ID, &frameRect);
 
         drawList->AddRectFilled(position, position + frameSize, colCanvas);
         drawList->AddRectFilled(position + sizePadding,
@@ -203,11 +219,13 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         mFloat xPosNutre = 0;
         mFloat xPosAdded = -0.5 * sizePadding.x;
 
-        ImVec2 points[nbGraduationX + 1];
+        std::vector<std::vector<ImVec2>> lines;
+        lines.resize(nbPressureLine);
+        for (auto &line : lines) { line.resize(divTemp + 2); }
 
-        for (mUInt i = 0; i < nbGraduationX; ++i)
+        for (mUInt i = 0; i <= divTemp; ++i)
         {
-            mFloat xPos = sizeGraph.x * i / (nbGraduationX)-1;
+            mFloat xPos = sizeGraph.x * i / (divTemp + 1) - 1;
             drawList->AddLine(graphOrigin + ImVec2(xPos, yPosNutre),
                               graphOrigin + ImVec2(xPos, yPosAdded), colLine);
 
@@ -215,11 +233,15 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                               graphOrigin + ImVec2(xPos, -sizeGraph.y),
                               colLine);
 
-            mFloat temperature = minTemp + (maxTemp - minTemp) * i / (nbGraduationX-1);
-            points[i].x        = graphOrigin.x + xPos;
-            mDouble tephi = (temperature+273.15)*std::pow((100/100), 0.286);
-            mDouble tephiRatio = (tephi - minPhi)/(maxPhi - minPhi);
-            points[i].y = graphOrigin.y - tephiRatio * sizeGraph.y;
+            mFloat temperature = minTemp + (maxTemp - minTemp) * i / (divTemp);
+            for (mUInt k = 0; k < nbPressureLine; ++k)
+            {
+                mFloat  pressure   = maxPressure - k * deltaPressure;
+                mDouble tephi      = getPhi(temperature, pressure);
+                mDouble tephiRatio = (tephi - minPhi) / (maxPhi - minPhi);
+                lines[k][i].x      = graphOrigin.x + xPos;
+                lines[k][i].y      = graphOrigin.y - tephiRatio * sizeGraph.y;
+            }
 
             char temp[16];
             ImFormatString(temp, 16, "%d", mInt(temperature));
@@ -227,14 +249,22 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                               colLine, temp);
         }
 
-        points[nbGraduationX].x        = graphOrigin.x + sizeGraph.x;
-        mDouble tephi = 273.15+maxTemp + ((maxTemp - minTemp) / (nbGraduationX-1)) *std::pow((100/100), 0.286);
-        mDouble tephiRatio = (tephi - minPhi)/(maxPhi - minPhi);
-        points[nbGraduationX].y = graphOrigin.y - tephiRatio * sizeGraph.y;
-
-        for (mUInt i = 0; i < nbGraduationY; ++i)
         {
-            mFloat yPos = -sizeGraph.y * i / (nbGraduationY)-1;
+            mFloat temperature = maxTemp + ((maxTemp - minTemp) / (divTemp));
+            for (mUInt k = 0; k < nbPressureLine; ++k)
+            {
+                mFloat  pressure        = maxPressure - k * deltaPressure;
+                mDouble tephi           = getPhi(temperature, pressure);
+                mDouble tephiRatio      = (tephi - minPhi) / (maxPhi - minPhi);
+                lines[k][divTemp + 1].x = graphOrigin.x + sizeGraph.x;
+                lines[k][divTemp + 1].y =
+                    graphOrigin.y - tephiRatio * sizeGraph.y;
+            }
+        }
+
+        for (mUInt i = 0; i <= divPhi; ++i)
+        {
+            mFloat yPos = -sizeGraph.y * i / (divPhi + 1) - 1;
             drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
                               graphOrigin + ImVec2(xPosAdded, yPos), colLine);
 
@@ -242,9 +272,14 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                               graphOrigin + ImVec2(sizeGraph.x, yPos), colLine);
         }
 
-        ImGui::PushClipRect(
-            position + sizePadding, position + sizePadding + sizeGraph, true);
-        drawList->AddPolyline(points, nbGraduationX + 1, colPress, 0, 1.0f);
+        ImGui::PushClipRect(position + sizePadding,
+                            position + sizePadding + sizeGraph, true);
+
+        for (auto &line : lines)
+        {
+            drawList->AddPolyline(line.data(), line.size(), colPress, 0,
+                                  1.0f);
+        }
 
         ImGui::End();
 
