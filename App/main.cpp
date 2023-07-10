@@ -27,20 +27,70 @@ const m::logging::mChannelID m_Tephigram_ID = mLog_getId();
 
 using namespace m;
 
-ImVec2 operator+(const ImVec2 &a_r, ImVec2 const &a_l)
+static const mFloat g_k   = 0.286f;
+static const mFloat g_c2k = 273.15f;
+
+ImVec2 operator+(ImVec2 const &a_r, ImVec2 const &a_l)
 {
     return {a_r.x + a_l.x, a_r.y + a_l.y};
 }
 
-ImVec2 operator-(const ImVec2 &a_r, ImVec2 const &a_l)
+ImVec2 operator-(ImVec2 const &a_r, ImVec2 const &a_l)
 {
     return {a_r.x - a_l.x, a_r.y - a_l.y};
 }
 
 // temperature °C, pressure kPa
-mFloat get_phi(const mFloat a_temperature, const mFloat a_pressure)
+mFloat get_phi(mFloat const a_temperature, mFloat const a_pressure)
 {
-    return (a_temperature + 273.15) * std::pow((100 / a_pressure), 0.286);
+    return (a_temperature + 273.15) * std::pow((100 / a_pressure), g_k);
+}
+
+mFloat get_pressure(mFloat const a_temperature, mFloat const a_phi)
+{
+    return 100 / std::pow(a_phi / (a_temperature + g_c2k), 1 / g_k);
+}
+
+mFloat get_tempFromPos(ImVec2 const &a_position,
+                       ImVec2 const &a_boundsTemperature,
+                       ImVec2 const &a_sizeGraph, mFloat a_angleGraph)
+{
+    mFloat xTemp = a_position.x - (a_position.y - 0.5 * a_sizeGraph.y) *
+                                      std::tan(a_angleGraph);
+    return a_boundsTemperature.x +
+           (xTemp / a_sizeGraph.x) *
+               (a_boundsTemperature.y - a_boundsTemperature.x);
+}
+
+mFloat get_phiFromPos(ImVec2 const &a_position, ImVec2 const &a_boundsPhi,
+                      ImVec2 const &a_sizeGraph, mFloat a_angleGraph)
+{
+    mFloat xPhi = a_position.y +
+                  (a_position.x - 0.5 * a_sizeGraph.x) * std::tan(a_angleGraph);
+    return a_boundsPhi.x +
+           (xPhi / a_sizeGraph.y) * (a_boundsPhi.y - a_boundsPhi.x);
+}
+
+mFloat get_yFromXandPressure(mFloat const a_x, mFloat const a_pressure,
+                             ImVec2 const &a_boundsTemperature,
+                             ImVec2 const &a_boundsPhi,
+                             ImVec2 const &a_sizeGraph, mFloat a_angleGraph)
+{
+    mFloat b      = 0.5 * a_sizeGraph.y;
+    mFloat b2     = 0.5 * a_sizeGraph.x;
+    mFloat sx     = a_sizeGraph.x;
+    mFloat sy     = a_sizeGraph.y;
+    mFloat mt     = a_boundsTemperature.x + g_c2k;
+    mFloat mphi   = a_boundsPhi.x;
+    mFloat dt     = a_boundsTemperature.y - a_boundsTemperature.x;
+    mFloat dphi   = a_boundsPhi.y - a_boundsPhi.x;
+    mFloat tan    = std::tan(a_angleGraph);
+    mFloat invTan = 1 / tan;
+    mFloat p      = std::pow(100 / a_pressure, g_k);
+    mFloat temperature =
+        (mphi + (b + (a_x - b2) * tan + invTan * (mt * sx / dt + a_x)) * (dphi/sy)) /
+        (p + (dphi/sy) * invTan * sx / dt);
+    return -invTan * ((temperature - mt) * sx / dt - a_x) + b;
 }
 
 class TephigramApp : public m::crossPlatform::IWindowedApplication
@@ -150,9 +200,9 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             0.001 *
             std::chrono::duration_cast<std::chrono::milliseconds>(a_deltaTime)
                 .count();
-        if (currentTime > (2.0 * 3.1415))
+        if (currentTime > (2.0 * std::numbers::pi))
         {
-            currentTime -= 2.0 * 3.1415;
+            currentTime -= 2.0 * std::numbers::pi;
         }
 
         start_dearImGuiNewFrame(*m_pDx12Api);
@@ -167,6 +217,16 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             1000000.0 / std::chrono::duration_cast<std::chrono::microseconds>(
                             a_deltaTime)
                             .count());
+
+        static ImVec2 mousePos{0, 0};
+        ImGui::Text("MousePos: %f:%f", mousePos.x, mousePos.y);
+        static mFloat cursorTemp = 0.0f;
+        ImGui::Text("Temp @ cursor (°C): %f", cursorTemp);
+        static mFloat cursorPhi = 0.0f;
+        ImGui::Text("Temp Capacity @ cursor (K): %f", cursorPhi);
+        static mFloat cursorPressure = 0.0f;
+        ImGui::Text("Pressure @ cursor (kPa): %f", cursorPressure);
+
         ImGui::End();
 
         // Tephigram-----------
@@ -197,6 +257,10 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         static mFloat deltaPressure = 10;
         ImGui::DragFloat("Pressure Delta", &deltaPressure, 1, 1, 30);
 
+        static mFloat roation = 0.25;
+        ImGui::DragFloat("grid angle(rad)", &roation, 0.01, 0.0, 0.45);
+        mFloat angle = std::numbers::pi * roation;
+
         ImGui::End();
 
         ImGui::Begin("Tephigram");
@@ -222,15 +286,13 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                                 position + sizePadding + sizeGraph, colBg);
 
         mFloat yPosNutre = 0;
-        mFloat yPosAdded = 0.1 * sizePadding.y;
         mFloat xPosNutre = 0;
-        mFloat xPosAdded = -0.5 * sizePadding.x;
 
         // Clip rect
         ImGui::PushClipRect(position + sizePadding,
                             position + sizePadding + sizeGraph, true);
 
-        mFloat tiltX = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.y);
+        mFloat tiltX             = std::tan(angle) * (0.5 * sizeGraph.y);
         mInt   additionalDivTemp = tiltX / deltaTemp;
         mFloat sizeHorizontal    = sizeGraph.x / (divTemp + 1);
         // Crooked
@@ -238,7 +300,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
              ++i)
         {
             mFloat xPos = i * sizeHorizontal;
-            mFloat tilt = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.y);
+            mFloat tilt = std::tan(angle) * (0.5 * sizeGraph.y);
 
             drawList->AddLine(graphOrigin + ImVec2(xPos - tilt, yPosNutre),
                               graphOrigin + ImVec2(xPos + tilt, -sizeGraph.y),
@@ -252,13 +314,13 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                               colLine, string);
         }
 
-        mFloat tiltY = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.x);
+        mFloat tiltY            = std::tan(angle) * (0.5 * sizeGraph.x);
         mInt   additionalDivPhi = tiltY / deltaPhi;
         mFloat sizeVertical     = sizeGraph.y / (divPhi + 1);
         for (mInt i = -additionalDivPhi; i <= (divPhi + additionalDivPhi); ++i)
         {
             mFloat yPos = -sizeVertical * i;
-            mFloat tilt = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.x);
+            mFloat tilt = std::tan(angle) * (0.5 * sizeGraph.x);
 
             drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos - tilt),
                               graphOrigin + ImVec2(sizeGraph.x, yPos + tilt),
@@ -273,15 +335,24 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                 colLine, string);
         }
 
+        // Cursor data
+        mousePos = ImVec2(ImGui::GetMousePos().x - graphOrigin.x,
+                          graphOrigin.y - ImGui::GetMousePos().y);
+        cursorTemp =
+            get_tempFromPos(mousePos, {minTemp, maxTemp}, sizeGraph, angle);
+        cursorPhi =
+            get_phiFromPos(mousePos, {minPhi, maxPhi}, sizeGraph, angle);
+        cursorPressure = get_pressure(cursorTemp, cursorPhi);
+
         // Pressure Lines
         std::vector<std::vector<ImVec2>> lines;
         lines.resize(nbPressureLine);
         for (auto &line : lines)
         {
-            line.resize(divTemp + 2 * additionalDivTemp + 1);
+            line.resize(divTemp + 2 * additionalDivTemp + 2);
         }
-        for (mInt i = -additionalDivTemp; i <= (divTemp + additionalDivTemp);
-             ++i)
+        for (mInt i = -additionalDivTemp;
+             i <= (divTemp + additionalDivTemp) + 1; ++i)
         {
             mFloat temperature = minTemp + deltaTemp * i;
             for (mUInt k = 0; k < nbPressureLine; ++k)
@@ -290,21 +361,46 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                 mDouble tephi      = get_phi(temperature, pressure);
                 mFloat  tephiRatio = (tephi - minPhi) / (maxPhi - minPhi);
 
-                ImVec2 ot{i * sizeHorizontal, (-0.5f * sizeGraph.y)};
-                ImVec2 ophi{0.5f * sizeGraph.x, -tephiRatio * sizeGraph.y};
+                ImVec2 oT{i * sizeHorizontal, (-0.5f * sizeGraph.y)};
+                ImVec2 oPhi{0.5f * sizeGraph.x, -tephiRatio * sizeGraph.y};
 
-                mFloat t = (ot.x + ot.y - ophi.x - ophi.y) / 2;
+                mFloat alphaT   = std::sin(angle);
+                mFloat alphaPhi = std::cos(angle);
+                mFloat betaT    = -std::cos(angle);
+                mFloat betaPhi  = std::sin(angle);
 
-                lines[k][i + additionalDivTemp].x = graphOrigin.x + ophi.x + t;
-                lines[k][i + additionalDivTemp].y = graphOrigin.y + ophi.y + t;
-                if (i == divTemp / 4)
+                mFloat tPhi = 0;
+                if (alphaT == 0)
                 {
-                    char string[16];
-                    ImFormatString(string, 16, "p:%d", mInt(pressure));
-                    drawList->AddText(ImVec2(graphOrigin.x + i * sizeHorizontal,
-                                             graphOrigin.y + ophi.y + t),
-                                      colLine, string);
+                    lines[k][i + additionalDivTemp].x = graphOrigin.x + oT.x;
+                    lines[k][i + additionalDivTemp].y = graphOrigin.y + oPhi.y;
                 }
+                else
+                {
+                    tPhi =
+                        (oT.y + (betaT / alphaT) * (oPhi.x - oT.x) - oPhi.y) /
+                        (betaPhi - betaT * (alphaPhi / alphaT));
+
+                    lines[k][i + additionalDivTemp].x =
+                        graphOrigin.x + oPhi.x + alphaPhi * tPhi;
+                    lines[k][i + additionalDivTemp].y =
+                        graphOrigin.y + oPhi.y + betaPhi * tPhi;
+                }
+            }
+        }
+
+        for (mUInt k = 0; k < nbPressureLine; ++k)
+        {
+            mFloat pressure = maxPressure - k * deltaPressure;
+            mFloat x        = (divTemp / 4) * sizeHorizontal;
+            mFloat y =
+                get_yFromXandPressure(x, pressure, {minTemp, maxTemp},
+                                      {minPhi, maxPhi}, sizeGraph, angle);
+            {
+                char string[16];
+                ImFormatString(string, 16, "p:%d", mInt(pressure));
+                drawList->AddText(ImVec2(graphOrigin.x + x, graphOrigin.y - y),
+                                  colLine, string);
             }
         }
 
