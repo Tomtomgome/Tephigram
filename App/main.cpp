@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <random>
 #include <algorithm>
+#include <numbers>
 
 #include <MesumGraphics/DearImgui/imgui_internal.h>
 
@@ -37,7 +38,7 @@ ImVec2 operator-(const ImVec2 &a_r, ImVec2 const &a_l)
 }
 
 // temperature °C, pressure kPa
-mFloat getPhi(const mFloat a_temperature, const mFloat a_pressure)
+mFloat get_phi(const mFloat a_temperature, const mFloat a_pressure)
 {
     return (a_temperature + 273.15) * std::pow((100 / a_pressure), 0.286);
 }
@@ -50,8 +51,8 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
 
         // Window setup
         m::mCmdLine const &cmdLine = a_cmdLine;
-        m::mUInt           width   = 600;
-        m::mUInt           height  = 600;
+        m::mUInt           width   = 1280;
+        m::mUInt           height  = 720;
 
         m_pDx12Api = new m::dx12::mApi();
         m_pDx12Api->init();
@@ -158,7 +159,9 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
 
         ImGui::NewFrame();
 
-        ImGui::Begin("Simulation Parameters");
+        ImGui::DockSpaceOverViewport(ImGui::GetMainViewport());
+
+        ImGui::Begin("Application info");
         ImGui::Text(
             "FPS: %f",
             1000000.0 / std::chrono::duration_cast<std::chrono::microseconds>(
@@ -167,16 +170,17 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         ImGui::End();
 
         // Tephigram-----------
-        ImGui::Begin("Tephigram Window");
+        ImGui::Begin("Tephigram Parameters");
 
         static mFloat boundTemp[2] = {-30, 30};
-        static mFloat boundPhi[2]  = {200, 400};
+        static mFloat boundPhi[2]  = {230, 400};
 
         ImGui::DragFloat2("Temperature Bounds (°C)", boundTemp, 0.5, -30, 30);
         mFloat      minTemp = boundTemp[0];
         mFloat      maxTemp = boundTemp[1];
         static mInt divTemp = 5;
         ImGui::DragInt("Temperature Subdivisions", &divTemp, 1, 0, 20);
+        mFloat deltaTemp = (maxTemp - minTemp) / divTemp;
 
         ImGui::DragFloat2("Temperature Capacity Bounds (°K)", boundPhi, 0.5, 50,
                           700);
@@ -184,6 +188,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         mFloat      maxPhi = boundPhi[1];
         static mInt divPhi = 5;
         ImGui::DragInt("Temperature Capacity Subdivisions", &divPhi, 1, 0, 20);
+        mFloat deltaPhi = (maxPhi - minPhi) / divPhi;
 
         static mInt nbPressureLine = 5;
         ImGui::DragInt("Nb Pressure Lines", &nbPressureLine, 1, 1, 10);
@@ -192,12 +197,15 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         static mFloat deltaPressure = 15;
         ImGui::DragFloat("Pressure Delta", &deltaPressure, 1, 1, 30);
 
+        ImGui::End();
+
+        ImGui::Begin("Tephigram");
         ImGuiContext &G        = *GImGui;
         ImGuiWindow  *window   = G.CurrentWindow;
         ImDrawList   *drawList = ImGui::GetWindowDrawList();
         ImVec2        position = window->DC.CursorPos;
 
-        const ImVec2 canvasSize  = {400, 300};
+        const ImVec2 canvasSize  = {800, 600};
         const ImVec2 sizePadding = {20, 20};
         const ImVec2 sizeGraph   = canvasSize - sizePadding - sizePadding;
         const ImVec2 graphOrigin =
@@ -206,7 +214,6 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         const ImU32 colBg     = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
         const ImU32 colLine   = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
         const ImU32 colPress  = ImColor(0.0f, 0.1f, 0.2f, 0.4f);
-
 
         ImVec2 frameSize = ImGui::CalcItemSize(canvasSize, 400, 300);
 
@@ -223,38 +230,93 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         lines.resize(nbPressureLine);
         for (auto &line : lines) { line.resize(divTemp + 2); }
 
-        for (mUInt i = 0; i <= divTemp; ++i)
-        {
-            mFloat xPos = sizeGraph.x * i / (divTemp + 1) - 1;
-            drawList->AddLine(graphOrigin + ImVec2(xPos, yPosNutre),
-                              graphOrigin + ImVec2(xPos, yPosAdded), colLine);
+        // Clip rect
+        ImGui::PushClipRect(position + sizePadding,
+                            position + sizePadding + sizeGraph, true);
 
-            drawList->AddLine(graphOrigin + ImVec2(xPos, yPosNutre),
-                              graphOrigin + ImVec2(xPos, -sizeGraph.y),
+        mFloat tiltX = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.y);
+        mInt   additionalDivTemp = tiltX / deltaTemp;
+        mFloat sizeHorizontal    = sizeGraph.x / (divTemp + 1);
+        // Crooked
+        for (mInt i = -additionalDivTemp; i <= (divTemp + additionalDivTemp);
+             ++i)
+        {
+            mFloat xPos = i * sizeHorizontal;
+            mFloat tilt = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.y);
+
+            drawList->AddLine(graphOrigin + ImVec2(xPos - tilt, yPosNutre),
+                              graphOrigin + ImVec2(xPos + tilt, -sizeGraph.y),
                               colLine);
 
-            mFloat temperature = minTemp + (maxTemp - minTemp) * i / (divTemp);
+            mFloat temperature = minTemp + deltaTemp * i;
+
+            char temp[16];
+            ImFormatString(temp, 16, "%d", mInt(temperature));
+            drawList->AddText(graphOrigin + ImVec2(xPos, -(0.5 * sizeGraph.y)),
+                              colLine, temp);
+        }
+
+        mFloat tiltY = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.x);
+        mInt   additionalDivPhi = tiltY / deltaPhi;
+        mFloat sizeVertical     = sizeGraph.y / (divPhi + 1);
+        for (mInt i = -additionalDivPhi; i <= (divPhi + additionalDivPhi); ++i)
+        {
+            mFloat yPos = -sizeVertical * i;
+            mFloat tilt = std::tan(std::numbers::pi / 4) * (0.5 * sizeGraph.x);
+
+            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos - tilt),
+                              graphOrigin + ImVec2(sizeGraph.x, yPos + tilt),
+                              colLine);
+
+            mFloat phi = minPhi + deltaPhi * i;
+
+            char temp[16];
+            ImFormatString(temp, 16, "%d", mInt(phi));
+            drawList->AddText(
+                graphOrigin + ImVec2((0.5 * sizeGraph.x) + 5, yPos - 5),
+                colLine, temp);
+        }
+
+        ImVec2 tiltedVector = {sizeVertical / 2, -sizeVertical / 2};
+
+        // normal
+        for (mUInt i = 0; i <= divTemp; ++i)
+        {
+            // ImVec2 pointStart{i * sizeHorizontal, };
+            mFloat xPos = sizeGraph.x * i / (divTemp + 1) - 1;
+            //            drawList->AddLine(graphOrigin + ImVec2(xPos,
+            //            yPosNutre),
+            //                              graphOrigin + ImVec2(xPos,
+            //                              yPosAdded), colLine);
+            //
+            //            drawList->AddLine(graphOrigin + ImVec2(xPos,
+            //            yPosNutre),
+            //                              graphOrigin + ImVec2(xPos,
+            //                              -sizeGraph.y), colLine);
+
+            mFloat temperature = minTemp + deltaTemp * i;
             for (mUInt k = 0; k < nbPressureLine; ++k)
             {
                 mFloat  pressure   = maxPressure - k * deltaPressure;
-                mDouble tephi      = getPhi(temperature, pressure);
+                mDouble tephi      = get_phi(temperature, pressure);
                 mDouble tephiRatio = (tephi - minPhi) / (maxPhi - minPhi);
                 lines[k][i].x      = graphOrigin.x + xPos;
                 lines[k][i].y      = graphOrigin.y - tephiRatio * sizeGraph.y;
             }
 
-            char temp[16];
-            ImFormatString(temp, 16, "%d", mInt(temperature));
-            drawList->AddText(graphOrigin + ImVec2(xPos, 0.3 * yPosAdded),
-                              colLine, temp);
+            //            char temp[16];
+            //            ImFormatString(temp, 16, "%d", mInt(temperature));
+            //            drawList->AddText(graphOrigin + ImVec2(xPos, 0.3 *
+            //            yPosAdded),
+            //                              colLine, temp);
         }
 
         {
-            mFloat temperature = maxTemp + ((maxTemp - minTemp) / (divTemp));
+            mFloat temperature = maxTemp + (deltaTemp);
             for (mUInt k = 0; k < nbPressureLine; ++k)
             {
                 mFloat  pressure        = maxPressure - k * deltaPressure;
-                mDouble tephi           = getPhi(temperature, pressure);
+                mDouble tephi           = get_phi(temperature, pressure);
                 mDouble tephiRatio      = (tephi - minPhi) / (maxPhi - minPhi);
                 lines[k][divTemp + 1].x = graphOrigin.x + sizeGraph.x;
                 lines[k][divTemp + 1].y =
@@ -262,24 +324,29 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             }
         }
 
-        for (mUInt i = 0; i <= divPhi; ++i)
-        {
-            mFloat yPos = -sizeGraph.y * i / (divPhi + 1) - 1;
-            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
-                              graphOrigin + ImVec2(xPosAdded, yPos), colLine);
-
-            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
-                              graphOrigin + ImVec2(sizeGraph.x, yPos), colLine);
-        }
+        //        for (mUInt i = 0; i <= divPhi; ++i)
+        //        {
+        //            mFloat yPos = -sizeGraph.y * i / (divPhi + 1) - 1;
+        //            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
+        //                              graphOrigin + ImVec2(xPosAdded, yPos),
+        //                              colLine);
+        //
+        //            drawList->AddLine(graphOrigin + ImVec2(xPosNutre, yPos),
+        //                              graphOrigin + ImVec2(sizeGraph.x, yPos),
+        //                              colLine);
+        //        }
 
         ImGui::PushClipRect(position + sizePadding,
                             position + sizePadding + sizeGraph, true);
 
         for (auto &line : lines)
         {
-            drawList->AddPolyline(line.data(), line.size(), colPress, 0,
-                                  1.0f);
+            //            drawList->AddPolyline(line.data(), line.size(),
+            //            colPress, 0,
+            //                                  1.0f);
         }
+
+        ImGui::PopClipRect();
 
         ImGui::End();
 
