@@ -195,7 +195,7 @@ mFloat get_yFromXandPressure(mFloat const a_x, mFloat const a_pressure,
 
 struct GridParameters
 {
-    ImVec2 boundTemp{-40, 15};  // °C
+    ImVec2 boundTemp{-37.5, 15};  // °C
     mInt   divTemp{6};
     ImVec2 boundPhi{285, 345};  // °K
     mInt   divPhi{5};
@@ -301,6 +301,16 @@ void PseudoAdiabatsParameters::expose_dearImGui()
 
         ImGui::TreePop();
     }
+}
+
+void draw_reticule(ImVec2 const &a_position, ImColor const &a_color)
+{
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    drawList->AddCircle(a_position, 6, a_color, 8, 1.0f);
+    drawList->AddLine(a_position + ImVec2{-6, 0}, a_position + ImVec2{6, 0},
+                      a_color, 1.0f);
+    drawList->AddLine(a_position + ImVec2{0, -6}, a_position + ImVec2{0, 6},
+                      a_color, 1.0f);
 }
 
 class TephigramApp : public m::crossPlatform::IWindowedApplication
@@ -473,6 +483,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             position + ImVec2(sizePadding.x, sizePadding.y + sizeGraph.y);
         const ImU32 colCanvas      = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
         const ImU32 colBg          = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
+        const ImU32 colCursor      = ImColor(0.9f, 0.1f, 0.1f, 1.0f);
         const ImU32 colLine        = ImColor(0.0f, 0.1f, 0.2f, 0.7f);
         const ImU32 colPress       = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
         const ImU32 colVapor       = ImColor(0.0f, 0.6f, 0.2f, 0.2f);
@@ -494,10 +505,16 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         mFloat tiltX             = std::tan(angle) * (0.5 * sizeGraph.y);
         mFloat sizeHorizontal    = sizeGraph.x / (m_gp.divTemp + 1);
         mInt   additionalDivTemp = tiltX / sizeHorizontal;
+
+        mFloat tiltY            = std::tan(angle) * (0.5 * sizeGraph.x);
+        mFloat sizeVertical     = sizeGraph.y / (m_gp.divPhi + 1);
+        mInt   additionalDivPhi = tiltY / sizeVertical;
+
         // Crooked
         for (mInt i = -additionalDivTemp;
              i <= (m_gp.divTemp + additionalDivTemp); ++i)
         {
+
             mFloat xPos = i * sizeHorizontal;
             mFloat tilt = std::tan(angle) * (0.5 * sizeGraph.y);
 
@@ -508,14 +525,11 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             mFloat temperature = minTemp + deltaTemp * i;
 
             char string[16];
-            ImFormatString(string, 16, "%d", mInt(temperature));
+            ImFormatString(string, 16, "%.0f", temperature);
             drawList->AddText(graphOrigin + ImVec2(xPos, -(0.5 * sizeGraph.y)),
                               colLine, string);
         }
 
-        mFloat tiltY            = std::tan(angle) * (0.5 * sizeGraph.x);
-        mFloat sizeVertical     = sizeGraph.y / (m_gp.divPhi + 1);
-        mInt   additionalDivPhi = tiltY / sizeVertical;
         for (mInt i = -additionalDivPhi; i <= (m_gp.divPhi + additionalDivPhi);
              ++i)
         {
@@ -529,7 +543,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             mFloat phi = minPhi + deltaPhi * i;
 
             char string[16];
-            ImFormatString(string, 16, "%d", mInt(phi));
+            ImFormatString(string, 16, "%.0f", phi);
             drawList->AddText(
                 graphOrigin + ImVec2((0.5 * sizeGraph.x) + 5, yPos - 5),
                 colLine, string);
@@ -538,6 +552,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         // Cursor data
         mousePos = ImVec2(ImGui::GetMousePos().x - graphOrigin.x,
                           graphOrigin.y - ImGui::GetMousePos().y);
+
         cursorTemp =
             get_tempFromPos(mousePos, {minTemp, maxTemp}, sizeGraph, angle);
         cursorPhi =
@@ -547,8 +562,10 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         waterSaturationRatio =
             get_wsFromTemperatureAndPressure(cursorTemp, cursorPressure);
 
-        ImGui::PushClipRect(position + sizePadding,
-                            position + sizePadding + sizeGraph, true);
+        // Reticule
+        ImVec2 drawMousePos = ImGui::GetMousePos();
+        draw_reticule(drawMousePos, colCursor);
+
         // Pressure Lines
         if (m_plp.showPressureLine)
         {
@@ -566,36 +583,11 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                 {
                     mFloat pressure =
                         m_plp.maxPressure - k * m_plp.deltaPressure;
-                    mDouble tephi      = get_phi(temperature, pressure);
-                    mFloat  tephiRatio = (tephi - minPhi) / (maxPhi - minPhi);
-
-                    ImVec2 oT{i * sizeHorizontal, (-0.5f * sizeGraph.y)};
-                    ImVec2 oPhi{0.5f * sizeGraph.x, -tephiRatio * sizeGraph.y};
-
-                    mFloat alphaT   = std::sin(angle);
-                    mFloat alphaPhi = std::cos(angle);
-                    mFloat betaT    = -std::cos(angle);
-                    mFloat betaPhi  = std::sin(angle);
-
-                    mFloat tPhi = 0;
-                    if (alphaT == 0)
-                    {
-                        lines[k][i + additionalDivTemp].x =
-                            graphOrigin.x + oT.x;
-                        lines[k][i + additionalDivTemp].y =
-                            graphOrigin.y + oPhi.y;
-                    }
-                    else
-                    {
-                        tPhi = (oT.y + (betaT / alphaT) * (oPhi.x - oT.x) -
-                                oPhi.y) /
-                               (betaPhi - betaT * (alphaPhi / alphaT));
-
-                        lines[k][i + additionalDivTemp].x =
-                            graphOrigin.x + oPhi.x + alphaPhi * tPhi;
-                        lines[k][i + additionalDivTemp].y =
-                            graphOrigin.y + oPhi.y + betaPhi * tPhi;
-                    }
+                    mDouble tephi = get_phi(temperature, pressure);
+                    ImVec2  pos   = get_posFromTempAndPhi(
+                           temperature, tephi, m_gp.boundTemp, m_gp.boundPhi,
+                           sizeGraph, angle);
+                    lines[k][i + additionalDivTemp] = graphOrigin + pos;
                 }
             }
 
@@ -639,42 +631,14 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
                 for (mUInt k = 0; k < m_vlp.nbVaporLines; ++k)
                 {
                     mFloat ws = m_vlp.wss[k];
-                    //                ImVec2 position =
-                    //                get_posFromWandTemperature(
-                    //                    ws, temperature, {minTemp, maxTemp},
-                    //                    {minPhi, maxPhi}, sizeGraph, angle);
+
                     mFloat pressure =
                         get_pressureFromWandTemperature(ws, temperature);
-                    mDouble tephi      = get_phi(temperature, pressure);
-                    mFloat  tephiRatio = (tephi - minPhi) / (maxPhi - minPhi);
-
-                    ImVec2 oT{i * sizeHorizontal, (-0.5f * sizeGraph.y)};
-                    ImVec2 oPhi{0.5f * sizeGraph.x, -tephiRatio * sizeGraph.y};
-
-                    mFloat alphaT   = std::sin(angle);
-                    mFloat alphaPhi = std::cos(angle);
-                    mFloat betaT    = -std::cos(angle);
-                    mFloat betaPhi  = std::sin(angle);
-
-                    mFloat tPhi = 0;
-                    if (alphaT == 0)
-                    {
-                        vaporLines[k][i + additionalDivTemp].x =
-                            graphOrigin.x + oT.x;
-                        vaporLines[k][i + additionalDivTemp].y =
-                            graphOrigin.y + oPhi.y;
-                    }
-                    else
-                    {
-                        tPhi = (oT.y + (betaT / alphaT) * (oPhi.x - oT.x) -
-                                oPhi.y) /
-                               (betaPhi - betaT * (alphaPhi / alphaT));
-
-                        vaporLines[k][i + additionalDivTemp].x =
-                            graphOrigin.x + oPhi.x + alphaPhi * tPhi;
-                        vaporLines[k][i + additionalDivTemp].y =
-                            graphOrigin.y + oPhi.y + betaPhi * tPhi;
-                    }
+                    mDouble tephi = get_phi(temperature, pressure);
+                    ImVec2  pos   = get_posFromTempAndPhi(
+                           temperature, tephi, m_gp.boundTemp, m_gp.boundPhi,
+                           sizeGraph, angle);
+                    vaporLines[k][i + additionalDivTemp] = graphOrigin + pos;
                 }
             }
 
