@@ -31,6 +31,11 @@ static const mFloat g_k   = 0.286f;
 static const mFloat g_c2k = 273.15f;
 static const mFloat g_eps = 0.622f;  // R'/Rv
 
+static const mFloat g_cp = 1005.0f;  // J*kg-1*K-1
+
+static const mFloat g_A = 253000000.0f;  // kPa
+static const mFloat g_B = 5420.0f;       // °K
+
 ImVec2 operator+(ImVec2 const &a_r, ImVec2 const &a_l)
 {
     return {a_r.x + a_l.x, a_r.y + a_l.y};
@@ -90,26 +95,64 @@ mFloat get_phiFromPos(ImVec2 const &a_position, ImVec2 const &a_boundsPhi,
            (xPhi / a_sizeGraph.y) * (a_boundsPhi.y - a_boundsPhi.x);
 }
 
+// ImVec2 get_posFromTempAndPhi(mFloat const a_temperature, mFloat const a_phi,
+//                              ImVec2 const &a_boundsTemperature,
+//                              ImVec2 const &a_boundsPhi,
+//                              ImVec2 const &a_sizeGraph, mFloat a_angleGraph)
+//{
+//     mFloat sx     = a_sizeGraph.x;
+//     mFloat sy     = a_sizeGraph.y;
+//     mFloat mt     = a_boundsTemperature.x;
+//     mFloat mphi   = a_boundsPhi.x;
+//     mFloat dt     = a_boundsTemperature.y - a_boundsTemperature.x;
+//     mFloat dphi   = a_boundsPhi.y - a_boundsPhi.x;
+//     mFloat tan    = std::tan(a_angleGraph);
+//     mFloat invTan = 1 / tan;
+//
+//     mFloat x = (tan / (tan * tan + 1)) *
+//                ((sy / dphi) * (a_phi - mphi) - 0.5 * sy + 0.5 * sx +
+//                 (invTan * sx / dt) * (a_temperature - mt));
+//     mFloat y = -invTan * ((sx / dt) * (a_temperature - mt) - x) + 0.5 * sy;
+//
+//     return {x, -y};
+// }
+
 ImVec2 get_posFromTempAndPhi(mFloat const a_temperature, mFloat const a_phi,
-                             ImVec2 const &a_boundsTemperature,
+                             ImVec2 const &a_boundsTemp,
                              ImVec2 const &a_boundsPhi,
-                             ImVec2 const &a_sizeGraph, mFloat a_angleGraph)
+                             ImVec2 const &a_sizeGraph,
+                             mFloat const  a_angleGraph)
 {
-    mFloat sx     = a_sizeGraph.x;
-    mFloat sy     = a_sizeGraph.y;
-    mFloat mt     = a_boundsTemperature.x;
-    mFloat mphi   = a_boundsPhi.x;
-    mFloat dt     = a_boundsTemperature.y - a_boundsTemperature.x;
-    mFloat dphi   = a_boundsPhi.y - a_boundsPhi.x;
-    mFloat tan    = std::tan(a_angleGraph);
-    mFloat invTan = 1 / tan;
+    ImVec2 result{0.0f, 0.0f};
+    mFloat tempRatio =
+        (a_temperature - a_boundsTemp.x) / (a_boundsTemp.y - a_boundsTemp.x);
+    mFloat tephiRatio =
+        (a_phi - a_boundsPhi.x) / (a_boundsPhi.y - a_boundsPhi.x);
 
-    mFloat x = (tan / (tan * tan + 1)) *
-               ((sy / dphi) * (a_phi - mphi) - 0.5 * sy + 0.5 * sx +
-                (invTan * sx / dt) * (a_temperature - mt));
-    mFloat y = -invTan * ((sx / dt) * (a_temperature - mt) - x) + 0.5 * sy;
+    ImVec2 oT{tempRatio * a_sizeGraph.x, (-0.5f * a_sizeGraph.y)};
+    ImVec2 oPhi{0.5f * a_sizeGraph.x, -tephiRatio * a_sizeGraph.y};
 
-    return {x, y};
+    mFloat alphaT   = std::sin(a_angleGraph);
+    mFloat alphaPhi = std::cos(a_angleGraph);
+    mFloat betaT    = -std::cos(a_angleGraph);
+    mFloat betaPhi  = std::sin(a_angleGraph);
+
+    mFloat tPhi = 0;
+    if (alphaT == 0)
+    {
+        result.x = oT.x;
+        result.y = oPhi.y;
+    }
+    else
+    {
+        tPhi = (oT.y + (betaT / alphaT) * (oPhi.x - oT.x) - oPhi.y) /
+               (betaPhi - betaT * (alphaPhi / alphaT));
+
+        result.x = oPhi.x + alphaPhi * tPhi;
+        result.y = oPhi.y + betaPhi * tPhi;
+    }
+
+    return result;
 }
 
 // temperature °C, pressure kPa
@@ -152,9 +195,9 @@ mFloat get_yFromXandPressure(mFloat const a_x, mFloat const a_pressure,
 
 struct GridParameters
 {
-    mFloat boundTemp[2]{-40, 15};  // °C
-    mInt   divTemp{5};
-    mFloat boundPhi[2]{285, 345};  // °K
+    ImVec2 boundTemp{-40, 15};  // °C
+    mInt   divTemp{6};
+    ImVec2 boundPhi{285, 345};  // °K
     mInt   divPhi{5};
 
     mFloat rotation{0.25};  // rad
@@ -166,10 +209,11 @@ void GridParameters::expose_dearImGui()
 {
     if (ImGui::TreeNode("Grid Parameters"))
     {
-        ImGui::DragFloat2("Temperature Bounds (°C)", boundTemp, 0.5, -50, 50);
+        ImGui::DragFloat2("Temperature Bounds (°C)", &boundTemp.x, 0.5, -50,
+                          50);
         ImGui::DragInt("Temperature Subdivisions", &divTemp, 1, 0, 20);
-        ImGui::DragFloat2("Temperature Capacity Bounds (°K)", boundPhi, 0.5, 50,
-                          700);
+        ImGui::DragFloat2("Temperature Capacity Bounds (°K)", &boundPhi.x, 0.5,
+                          50, 700);
         ImGui::DragInt("Temperature Capacity Subdivisions", &divPhi, 1, 0, 20);
         ImGui::DragFloat("grid angle(rad)", &rotation, 0.01, 0.0, 0.45);
         ImGui::TreePop();
@@ -229,6 +273,31 @@ void VaporLineParameters::expose_dearImGui()
             ImFormatString(name, 16, "ws %d", mInt(i));
             ImGui::DragFloat(name, &wss[i], 0.01f, 0.1f, 100.0f);
         }
+
+        ImGui::TreePop();
+    }
+}
+
+struct PseudoAdiabatsParameters
+{
+    mInt   nbLine{8};
+    mFloat minTemp{-4};  // kPa
+    mFloat deltaTemp{4};
+
+    mBool showPseudoAdiabats{true};
+
+    void expose_dearImGui();
+};
+
+void PseudoAdiabatsParameters::expose_dearImGui()
+{
+    if (ImGui::TreeNode("Pseudo Adiabats"))
+    {
+        ImGui::Checkbox("Show pseudo adiabats", &showPseudoAdiabats);
+
+        ImGui::DragInt("Nb pseudo adiabats", &nbLine, 1, 1, 10);
+        ImGui::DragFloat("Min temperature (°C)", &minTemp, 1, -40, 40);
+        ImGui::DragFloat("temperature Delta (°C)", &deltaTemp, 1, 0.5, 10);
 
         ImGui::TreePop();
     }
@@ -387,6 +456,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
 
         m_plp.expose_dearImGui();
         m_vlp.expose_dearImGui();
+        m_pap.expose_dearImGui();
 
         ImGui::End();
 
@@ -401,11 +471,12 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
         const ImVec2 sizeGraph   = canvasSize - sizePadding - sizePadding;
         const ImVec2 graphOrigin =
             position + ImVec2(sizePadding.x, sizePadding.y + sizeGraph.y);
-        const ImU32 colCanvas = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
-        const ImU32 colBg     = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
-        const ImU32 colLine   = ImColor(0.0f, 0.1f, 0.2f, 0.7f);
-        const ImU32 colPress  = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
-        const ImU32 colVapor  = ImColor(0.0f, 0.6f, 0.2f, 0.2f);
+        const ImU32 colCanvas      = ImColor(0.95f, 0.95f, 0.85f, 1.0f);
+        const ImU32 colBg          = ImColor(0.9f, 0.9f, 0.8f, 1.0f);
+        const ImU32 colLine        = ImColor(0.0f, 0.1f, 0.2f, 0.7f);
+        const ImU32 colPress       = ImColor(0.0f, 0.1f, 0.2f, 0.2f);
+        const ImU32 colVapor       = ImColor(0.0f, 0.6f, 0.2f, 0.2f);
+        const ImU32 colPseudoAdiab = ImColor(0.1f, 0.0f, 0.2f, 0.2f);
 
         ImVec2 frameSize = ImGui::CalcItemSize(canvasSize, 400, 300);
 
@@ -551,6 +622,7 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             }
         }
 
+        // Vapor Lines
         if (m_vlp.showVaporLines)
         {
             // Vapor lines
@@ -613,6 +685,56 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
             }
         }
 
+        // Pseudo Adiabats
+        if (m_pap.showPseudoAdiabats)
+        {
+            std::vector<std::vector<ImVec2>> lines;
+            lines.resize(m_pap.nbLine);
+            const mInt subDivisions  = 100;
+            const mInt pressureStart = 100;
+            const mInt pressureGoal  = 10;
+            mFloat deltaP = mFloat(pressureGoal - pressureStart) / subDivisions;
+            for (auto &line : lines) { line.resize(subDivisions); }
+
+            for (mUInt k = 0; k < m_pap.nbLine; ++k)
+            {
+                mFloat temperature = m_pap.minTemp + m_pap.deltaTemp * k;
+                mFloat pressure    = 100;
+                for (mInt d = 0; d < subDivisions; ++d)
+                {
+                    mDouble tephi = get_phi(temperature, pressure);
+                    ImVec2  pos   = get_posFromTempAndPhi(
+                           temperature, tephi, m_gp.boundTemp, m_gp.boundPhi,
+                           sizeGraph, angle);
+                    lines[k][d] = graphOrigin + pos;
+
+                    // Update temperature and pressure
+                    mFloat tempK   = g_c2k + temperature;
+                    mFloat L       = 2500000.0f;
+                    mFloat eaexpbt = g_eps * g_A * std::exp(-g_B / tempK);
+                    mFloat deltaT =
+                        deltaP *
+                        (g_k / pressure +
+                         eaexpbt * L / (tempK * pressure * pressure * g_cp)) /
+                        (1 / tempK +
+                         eaexpbt * g_B * L /
+                             (tempK * tempK * tempK * pressure * g_cp));
+
+                    temperature += deltaT;
+                    pressure += deltaP;
+                }
+            }
+
+            for (auto &line : lines)
+            {
+                for (mUInt i = 0; i < line.size() - 1; i += 2)
+                {
+                    drawList->AddLine(line[i], line[i + 1], colPseudoAdiab,
+                                      1.0f);
+                }
+            }
+        }
+
         ImGui::PopClipRect();
 
         ImGui::End();
@@ -634,9 +756,10 @@ class TephigramApp : public m::crossPlatform::IWindowedApplication
     m::input::mCallbackInputManager m_inputManager;
     m::windows::mIWindow           *m_mainWindow;
 
-    GridParameters         m_gp;
-    PressureLineParameters m_plp;
-    VaporLineParameters    m_vlp;
+    GridParameters           m_gp;
+    PressureLineParameters   m_plp;
+    VaporLineParameters      m_vlp;
+    PseudoAdiabatsParameters m_pap;
 };
 
 M_EXECUTE_WINDOWED_APP(TephigramApp)
